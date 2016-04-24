@@ -1,93 +1,126 @@
 package com.air.yanrunfa.airpay;
 
 import android.app.Activity;
-import android.content.Context;
 import android.content.Intent;
-import android.content.pm.PackageManager;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
+import android.graphics.ImageFormat;
+import android.graphics.Matrix;
+import android.graphics.Rect;
+import android.graphics.YuvImage;
 import android.hardware.Camera;
-
 import android.os.Bundle;
+import android.os.Environment;
 import android.os.Handler;
 import android.os.Message;
 import android.util.Log;
-
-import android.view.Menu;
-import android.view.MenuItem;
-
+import android.view.View;
+import android.widget.Button;
 import android.widget.FrameLayout;
 import android.widget.Toast;
 
-import com.air.network.ExitAppliation;
+import com.air.yanrunfa.airpay.MainActivity;
+import com.air.yanrunfa.airpay.R;
+import com.air.yanrunfa.airpay.RegisterActivity;
+import com.air.yanrunfa.palmprint.Palmprint;
 
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
 import java.lang.ref.WeakReference;
-public class CameraActivity extends Activity {
+
+/**
+ * Created by zyson on 16-4-9.
+ */
+public class CameraActivity extends Activity implements View.OnClickListener, Camera.PictureCallback {
+    private final static String FILE_PATH = Environment.getExternalStorageDirectory().getAbsolutePath()
+            + "/AirPay/";
     private final static int EXTRACTION_FAIL = 0x111;
     private final static int EXTRACTION_SUCCEED=0x112;
-
-
-
-
-    private Camera mCamera;
-    private CameraPreview mPreview;
-    private RectDrawer rectDrawer;
-    //===================================================================================================//
+    private CameraPreview mPreview = null;
+    public static Button mCaptureButton = null;
+    private String TAG = "Zyson";
+    private int failNum = 0;
+    public Bitmap bitmap;
+    public mHandler mHandler;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
-        ExitAppliation.getInstance().addActivity(this);
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_camera);
-        mCamera=getCameraInstance();
-        mCamera.setDisplayOrientation(90);
-        mPreview=new CameraPreview(this,mCamera,new mHandler(this));
-        FrameLayout preview=(FrameLayout)findViewById(R.id.camera_preview);
+
+        // Create our Preview view
+        FrameLayout preview = (FrameLayout) findViewById(R.id.camera_preview);
+        mPreview = new CameraPreview(this);
         preview.addView(mPreview);
-        rectDrawer=new RectDrawer(this);
-        preview.addView(rectDrawer);
-    }
 
-
-
-
-
-
-    @Override
-    public boolean onCreateOptionsMenu(Menu menu) {
-        // Inflate the menu; this adds items to the action bar if it is present.
-        getMenuInflater().inflate(R.menu.menu_main, menu);
-        return true;
+        //Add listener to the caputure button
+        mCaptureButton = (Button) findViewById(R.id.capture_button);
+        mCaptureButton.setOnClickListener(this);
     }
 
     @Override
-    public boolean onOptionsItemSelected(MenuItem item) {
-        // Handle action bar item clicks here. The action bar will
-        // automatically handle clicks on the Home/Up button, so long
-        // as you specify a parent activity in AndroidManifest.xml.
-        int id = item.getItemId();
+    public void onPictureTaken(byte[] data, Camera camera) {
 
-        //noinspection SimplifiableIfStatement
-        if (id == R.id.action_settings) {
-            return true;
+        bitmap = decodeToBitMap(data, camera);
+        Palmprint palmprint = new Palmprint(bitmap);
+        Bundle bundle = new Bundle();
+        try {
+            bundle.putByteArray("palmprint", palmprint.extraction());
+            Message msg = new Message();
+            msg.what = 0x112;
+            msg.setData(bundle);
+            mHandler.sendMessage(msg);
+        } catch (IOException e) {
+            failNum++;
+            if (failNum == 5) {
+                bitmap = Bitmap.createBitmap(bitmap, bitmap.getWidth(), bitmap.getHeight(), 500, 500);
+                bundle.putByteArray("palmprint", palmprint.extractionWithROI(bitmap));
+                Message msg = new Message();
+                msg.what = 0x112;
+                msg.setData(bundle);
+                mHandler.sendMessage(msg);
+            } else {
+                Message msg = new Message();
+                msg.what = 0x111;
+                mHandler.sendMessage(msg);
+            }
         }
 
-        return super.onOptionsItemSelected(item);
+        // Restart Preview
+        camera.startPreview();
+
+        // See if need to enable or not
+        mCaptureButton.setEnabled(true);
     }
 
-    public static Camera getCameraInstance(){
-        Camera camera=null;
-        try{
-            camera=Camera.open();
-        }catch (Exception e) {
-            Log.d("TAG", "Error: " + e.getMessage());
+    private Bitmap decodeToBitMap(byte[] data, Camera _camera) {
+        Camera.Size size = _camera.getParameters().getPreviewSize();
+        Bitmap bitmap;
+        try {
+            YuvImage image = new YuvImage(data, ImageFormat.NV21, size.width, size.height, null);
+            ByteArrayOutputStream stream = new ByteArrayOutputStream();
+            image.compressToJpeg(new Rect(0, 0, size.width, size.height), 80, stream);
+            bitmap = BitmapFactory.decodeByteArray(stream.toByteArray(), 0, stream.size());
+            stream.close();
+            Matrix matrix = new Matrix();
+            matrix.reset();
+            matrix.setRotate(90);
+            bitmap = Bitmap.createBitmap(bitmap, 0, 0, bitmap.getWidth(), bitmap.getHeight(), matrix, true);
+            return bitmap;
+        } catch (Exception ex) {
+            Log.e("Sys", "Error:" + ex.getMessage());
         }
-        return camera;
+        return null;
     }
 
-    private boolean checkCameraHardware(Context context) {
-        return (context.getPackageManager().hasSystemFeature(PackageManager.FEATURE_CAMERA));
+    @Override
+    public void onClick(View v) {
+        mCaptureButton.setEnabled(false);
+
+        mPreview.takePicture(this);
     }
 
-    static class mHandler extends Handler{
+    static class mHandler extends Handler {
         WeakReference<CameraActivity> mActivity;
 
         mHandler(CameraActivity activity){
@@ -114,7 +147,7 @@ public class CameraActivity extends Activity {
                     //Intent intent=new Intent(cameraActivity, PayActivity.class);
                     intent.putExtra("isLogin",true);
                     intent.putExtra("palmprint",msg.getData());
-                  //  intent.putExtra("ip",cameraActivity.getIntent().getStringExtra("ip"));
+                    //  intent.putExtra("ip",cameraActivity.getIntent().getStringExtra("ip"));
                     cameraActivity.startActivity(intent);
                     //cameraActivity.mCamera.release();
                 }
@@ -125,8 +158,4 @@ public class CameraActivity extends Activity {
             }
         }
     }
-
-
 }
-
-

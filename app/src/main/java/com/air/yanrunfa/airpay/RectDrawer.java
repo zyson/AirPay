@@ -60,7 +60,7 @@ public class RectDrawer extends SurfaceView implements SurfaceHolder.Callback{
         p.setColor(Color.RED);
         p.setStyle(Paint.Style.STROKE);
         p.setStrokeWidth(3);
-        canvas.drawRect(mWidth/8,mHeight/4,mWidth-mWidth/4,mHeight/2,p);
+        canvas.drawRect(mWidth/8,mHeight/4,mWidth-mWidth/8,3*mHeight/4,p);
         sh.unlockCanvasAndPost(canvas);
 
     }
